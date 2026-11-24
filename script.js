@@ -9,6 +9,7 @@ let selectedSubject = "";
 let selectedSubjectName = "";
 let selectedMode = "";
 
+window.questionBanks = window.questionBanks || {};
 let loadedSubjectFiles = {};
 
 const departments = {
@@ -38,26 +39,19 @@ const departments = {
     }
 };
 
-/* Hide all screens */
-
 function hideAllScreens() {
     document.querySelectorAll(".screen").forEach(screen => {
         screen.classList.add("hidden");
     });
 }
 
-/* Welcome screen */
-
 function showDepartments() {
     hideAllScreens();
     document.getElementById("department-screen").classList.remove("hidden");
 }
 
-/* Department selection */
-
 function showSubjects(departmentKey) {
     selectedDepartment = departmentKey;
-
     hideAllScreens();
 
     const department = departments[departmentKey];
@@ -66,28 +60,21 @@ function showSubjects(departmentKey) {
         department.title + " - Select Subject";
 
     const container = document.getElementById("subjects-container");
-
     container.innerHTML = "";
 
     Object.entries(department.subjects).forEach(([key, name]) => {
         const button = document.createElement("button");
-
         button.textContent = name;
-
         button.onclick = () => selectSubject(key, name);
-
         container.appendChild(button);
     });
 
     document.getElementById("subject-screen").classList.remove("hidden");
 }
 
-/* Subject selection */
-
 function selectSubject(subjectKey, subjectName) {
     selectedSubject = subjectKey;
     selectedSubjectName = subjectName;
-
     hideAllScreens();
 
     document.getElementById("subject-selected-title").textContent =
@@ -96,56 +83,57 @@ function selectSubject(subjectKey, subjectName) {
     document.getElementById("mode-screen").classList.remove("hidden");
 }
 
-/* Load the selected subject file */
-
 function loadSubjectFile(subjectKey) {
-
-    if (loadedSubjectFiles[subjectKey]) {
-        return Promise.resolve();
+    if (window.questionBanks[subjectKey]) {
+        return Promise.resolve(window.questionBanks[subjectKey]);
     }
 
-    return new Promise((resolve, reject) => {
+    if (loadedSubjectFiles[subjectKey]) {
+        return loadedSubjectFiles[subjectKey];
+    }
 
+    loadedSubjectFiles[subjectKey] = new Promise((resolve, reject) => {
         const script = document.createElement("script");
 
         script.src = "questions/" + subjectKey + ".js";
 
         script.onload = () => {
-            loadedSubjectFiles[subjectKey] = true;
-            resolve();
+            const bank = window.questionBanks[subjectKey];
+
+            if (!bank) {
+                delete loadedSubjectFiles[subjectKey];
+
+                reject(
+                    new Error("Question bank was not registered: " + subjectKey)
+                );
+                return;
+            }
+
+            resolve(bank);
         };
 
         script.onerror = () => {
+            delete loadedSubjectFiles[subjectKey];
+
             reject(
-                new Error(
-                    "Could not load questions for " + subjectKey
-                )
+                new Error("Could not load: " + subjectKey)
             );
         };
 
         document.body.appendChild(script);
     });
+
+    return loadedSubjectFiles[subjectKey];
 }
 
-/* Start quiz */
-
 async function startQuiz(mode) {
-
     selectedMode = mode;
 
     const nextButton = document.getElementById("next-btn");
-
     nextButton.disabled = true;
 
     try {
-
-        await loadSubjectFile(selectedSubject);
-
-        const bank = window.subjectQuestionBank;
-
-        if (!bank || bank.subject !== selectedSubject) {
-            throw new Error("Subject question file is missing or incorrect.");
-        }
+        const bank = await loadSubjectFile(selectedSubject);
 
         let mcqQuestions = bank.mcq || [];
         let tfQuestions = bank.tf || [];
@@ -153,11 +141,9 @@ async function startQuiz(mode) {
         if (mode === "mcq") {
             currentQuestions = [...mcqQuestions];
         }
-
         else if (mode === "tf") {
             currentQuestions = [...tfQuestions];
         }
-
         else {
             currentQuestions = [
                 ...mcqQuestions,
@@ -175,25 +161,17 @@ async function startQuiz(mode) {
         answered = false;
 
         hideAllScreens();
-
         document.getElementById("quiz-screen").classList.remove("hidden");
 
         showQuestion();
 
     } catch (error) {
-
-        alert(
-            "Questions could not be loaded. Please check the subject file."
-        );
-
+        alert("Questions could not be loaded. Please check the subject file.");
         console.error(error);
     }
 }
 
-/* Display question */
-
 function showQuestion() {
-
     answered = false;
 
     const question = currentQuestions[currentIndex];
@@ -220,28 +198,22 @@ function showQuestion() {
     if (question.type === "tf") {
         options = ["True", "False"];
     }
-
-    else if (question.options) {
-        options = question.options;
-    }
-
     else {
-        options = [];
+        options = question.options || [];
     }
 
-    options.forEach((option, index) => {
-
+    options.forEach(option => {
         const button = document.createElement("button");
 
         button.className = "option-btn";
         button.textContent = option;
-
         button.onclick = () => selectAnswer(option);
 
         optionsContainer.appendChild(button);
     });
 
-    const progress = ((currentIndex + 1) / currentQuestions.length) * 100;
+    const progress =
+        ((currentIndex + 1) / currentQuestions.length) * 100;
 
     document.getElementById("progress-bar").style.width =
         progress + "%";
@@ -250,48 +222,39 @@ function showQuestion() {
 
     nextButton.disabled = true;
 
-    if (currentIndex === currentQuestions.length - 1) {
-        nextButton.textContent = "Finish";
-    } else {
-        nextButton.textContent = "Next";
-    }
+    nextButton.textContent =
+        currentIndex === currentQuestions.length - 1
+            ? "Finish"
+            : "Next";
 }
 
-/* Check answer */
-
 function selectAnswer(selectedOption) {
-
     if (answered) return;
 
     answered = true;
 
     const question = currentQuestions[currentIndex];
 
-    const buttons =
-        document.querySelectorAll(".option-btn");
-
     let correctAnswer;
 
     if (question.type === "tf") {
-
         if (typeof question.answer === "boolean") {
             correctAnswer = question.answer ? "True" : "False";
         }
-
         else {
             correctAnswer = String(question.answer);
         }
-
-    } else {
-
+    }
+    else {
         correctAnswer = question.answer;
     }
 
     const isCorrect =
         String(selectedOption) === String(correctAnswer);
 
-    buttons.forEach(button => {
+    const buttons = document.querySelectorAll(".option-btn");
 
+    buttons.forEach(button => {
         button.disabled = true;
 
         if (button.textContent === String(correctAnswer)) {
@@ -309,14 +272,12 @@ function selectAnswer(selectedOption) {
     const feedback = document.getElementById("feedback");
 
     if (isCorrect) {
-
         score++;
 
         feedback.innerHTML =
             '<p class="correct-feedback">Correct Answer!</p>';
-
-    } else {
-
+    }
+    else {
         feedback.innerHTML =
             '<p class="wrong-feedback">Incorrect!</p>' +
             '<p>Correct answer: ' +
@@ -330,10 +291,7 @@ function selectAnswer(selectedOption) {
     document.getElementById("next-btn").disabled = false;
 }
 
-/* Next question */
-
 function nextQuestion() {
-
     if (!answered) return;
 
     currentIndex++;
@@ -341,16 +299,12 @@ function nextQuestion() {
     if (currentIndex < currentQuestions.length) {
         showQuestion();
     }
-
     else {
         showResults();
     }
 }
 
-/* Results */
-
 function showResults() {
-
     hideAllScreens();
 
     document.getElementById("result-screen").classList.remove("hidden");
@@ -365,26 +319,18 @@ function showResults() {
         "Your score: " + percentage.toFixed(1) + "%";
 }
 
-/* Restart quiz */
-
 function restartQuiz() {
     startQuiz(selectedMode);
 }
 
-/* Back navigation */
-
 function goBack(screenId) {
-
     hideAllScreens();
 
     document.getElementById(screenId).classList.remove("hidden");
 }
 
-/* Home */
-
 function goHome() {
-
     hideAllScreens();
 
     document.getElementById("welcome-screen").classList.remove("hidden");
-  }
+        }
